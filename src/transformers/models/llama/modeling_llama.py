@@ -316,7 +316,7 @@ class LlamaAttention(nn.Module):
                 key_states,
                 value_states,
                 batch_dim_idx=0,
-                attn_mask=None,
+                attn_mask=attention_mask,
                 dropout_p=0.0 if not self.training else self.attention_dropout,
                 scale=self.scaling,
                 is_causal=True,
@@ -329,7 +329,7 @@ class LlamaAttention(nn.Module):
                 query_states,
                 key_states,
                 value_states,
-                attention_mask=None,
+                attention_mask=attention_mask,
                 dropout=0.0 if not self.training else self.attention_dropout,
                 scaling=self.scaling,
                 is_causal = True,
@@ -344,6 +344,8 @@ class LlamaAttention(nn.Module):
 class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
+        self.config = config
+        self.seq_length = config.seq_length
         self.hidden_size = config.hidden_size
 
         self.self_attn = LlamaAttention(config=config, layer_idx=layer_idx)
@@ -364,9 +366,27 @@ class LlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        residual = hidden_states
-
-        hidden_states = self.input_layernorm(hidden_states)
+        if self.config._attn_implementation == "ulysses":
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            seq_length = self.seq_length
+            seqs_per_rank = seq_length // world_size
+            start = rank * seqs_per_rank
+            end = (rank + 1) * seqs_per_rank if rank != world_size - 1 else seq_length 
+            if hidden_states.shape[1] > seqs_per_rank:
+                hidden_states = hidden_states[:, start:end, :]
+            if isinstance(position_embeddings, tuple):
+                position_embeddings = tuple(
+                    pe[:, start:end, :] if pe.shape[1] > seqs_per_rank else pe
+                    for pe in position_embeddings
+                )
+            cos, sin = position_embeddings
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
+        else:
+            cos, sin = position_embeddings
+            residual = hidden_states
+            hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
         hidden_states, self_attn_weights = self.self_attn(
@@ -1208,3 +1228,4 @@ __all__ = [
     "LlamaForQuestionAnswering",
     "LlamaForTokenClassification",
 ]
+
