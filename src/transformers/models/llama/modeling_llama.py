@@ -344,12 +344,10 @@ class LlamaAttention(nn.Module):
 class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
-        self.config = config
         self.seq_length = config.seq_length
+        self._attn_implementation = config._attn_implementation
         self.hidden_size = config.hidden_size
-
         self.self_attn = LlamaAttention(config=config, layer_idx=layer_idx)
-
         self.mlp = LlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -366,7 +364,7 @@ class LlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        if self.config._attn_implementation == "ulysses":
+        if self._attn_implementation == "ulysses":
             world_size = dist.get_world_size()
             rank = dist.get_rank()
             seq_length = self.seq_length
