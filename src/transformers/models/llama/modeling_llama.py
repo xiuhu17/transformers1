@@ -282,13 +282,13 @@ class LlamaAttention(nn.Module):
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
 
         # neel: comment out position embeddings
-        cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        # cos, sin = position_embeddings
+        # query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
-        if past_key_value is not None:
-            # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+        # if past_key_value is not None:
+        #     # sin and cos are specific to RoPE models; cache_position needed for the static cache
+        #     cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+        #     key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
@@ -316,7 +316,7 @@ class LlamaAttention(nn.Module):
                 key_states,
                 value_states,
                 batch_dim_idx=0,
-                attn_mask=attention_mask,
+                attn_mask=None,
                 dropout_p=0.0 if not self.training else self.attention_dropout,
                 scale=self.scaling,
                 is_causal=True,
@@ -329,12 +329,13 @@ class LlamaAttention(nn.Module):
                 query_states,
                 key_states,
                 value_states,
-                attention_mask=attention_mask,
+                attention_mask=None,
                 dropout=0.0 if not self.training else self.attention_dropout,
                 scaling=self.scaling,
                 is_causal = True,
                 **kwargs,
             )
+            attn_output = attn_output.permute(0, 2, 1, 3).contiguous()
 
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
@@ -344,10 +345,10 @@ class LlamaAttention(nn.Module):
 class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
-        self.seq_length = config.seq_length
-        self._attn_implementation = config._attn_implementation
         self.hidden_size = config.hidden_size
+
         self.self_attn = LlamaAttention(config=config, layer_idx=layer_idx)
+
         self.mlp = LlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -364,27 +365,9 @@ class LlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        if self._attn_implementation == "ulysses":
-            world_size = dist.get_world_size()
-            rank = dist.get_rank()
-            seq_length = self.seq_length
-            seqs_per_rank = seq_length // world_size
-            start = rank * seqs_per_rank
-            end = (rank + 1) * seqs_per_rank if rank != world_size - 1 else seq_length 
-            if hidden_states.shape[1] > seqs_per_rank:
-                hidden_states = hidden_states[:, start:end, :]
-            if isinstance(position_embeddings, tuple):
-                position_embeddings = tuple(
-                    pe[:, start:end, :] if pe.shape[1] > seqs_per_rank else pe
-                    for pe in position_embeddings
-                )
-            cos, sin = position_embeddings
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            cos, sin = position_embeddings
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
+        residual = hidden_states
+
+        hidden_states = self.input_layernorm(hidden_states)
 
         # Self Attention
         hidden_states, self_attn_weights = self.self_attn(
@@ -399,7 +382,6 @@ class LlamaDecoderLayer(nn.Module):
             **kwargs,
         )
         hidden_states = residual + hidden_states
-
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
@@ -407,8 +389,8 @@ class LlamaDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
-        if output_attentions:
-            outputs += (self_attn_weights,)
+        #if output_attentions:
+        #    outputs += (self_attn_weights,)
 
         return outputs
 
@@ -797,6 +779,10 @@ class LlamaModel(LlamaPreTrainedModel):
             if attention_mask is not None:
                 causal_mask = causal_mask.clone()  # copy to contiguous memory for in-place edit
                 mask_length = attention_mask.shape[-1]
+                #padding_mask = causal_mask[:, :, :, :mask_length]
+                #padding_mask += attention_mask[:, None, None, :].to(
+                #    causal_mask.device
+                #)
                 padding_mask = causal_mask[:, :, :, :mask_length] + attention_mask[:, None, None, :].to(
                     causal_mask.device
                 )
@@ -1226,4 +1212,3 @@ __all__ = [
     "LlamaForQuestionAnswering",
     "LlamaForTokenClassification",
 ]
-
