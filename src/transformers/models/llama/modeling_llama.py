@@ -321,7 +321,6 @@ class LlamaAttention(nn.Module):
                 scale=self.scaling,
                 is_causal=True,
             )
-
         else:
             # b, n, s, h
             attn_output, attn_weights = attention_interface(
@@ -335,7 +334,6 @@ class LlamaAttention(nn.Module):
                 is_causal = True,
                 **kwargs,
             )
-
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
@@ -407,8 +405,8 @@ class LlamaDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
-        if output_attentions:
-            outputs += (self_attn_weights,)
+        # if output_attentions:
+        #     outputs += (self_attn_weights,)
 
         return outputs
 
