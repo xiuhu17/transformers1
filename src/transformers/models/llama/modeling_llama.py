@@ -304,6 +304,8 @@ class LlamaAttention(nn.Module):
         # Ulysses requires: b, s, n, h
         # need to permute and undo accordingly
         if self.config._attn_implementation == "ulysses":
+            key_states = repeat_kv(key_states, self.num_key_value_groups)
+            value_states = repeat_kv(value_states, self.num_key_value_groups)
             query_states = query_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
             key_states = key_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
             value_states = value_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
@@ -316,7 +318,7 @@ class LlamaAttention(nn.Module):
                 key_states,
                 value_states,
                 batch_dim_idx=0,
-                attn_mask=attention_mask,
+                attn_mask=None,
                 dropout_p=0.0 if not self.training else self.attention_dropout,
                 scale=self.scaling,
                 is_causal=True,
@@ -328,7 +330,7 @@ class LlamaAttention(nn.Module):
                 query_states,
                 key_states,
                 value_states,
-                attention_mask=attention_mask,
+                attention_mask=None,
                 dropout=0.0 if not self.training else self.attention_dropout,
                 scaling=self.scaling,
                 is_causal = True,
