@@ -304,8 +304,6 @@ class LlamaAttention(nn.Module):
         # Ulysses requires: b, s, n, h
         # need to permute and undo accordingly
         if self.config._attn_implementation == "ulysses":
-            key_states = repeat_kv(key_states, self.num_key_value_groups)
-            value_states = repeat_kv(value_states, self.num_key_value_groups)
             query_states = query_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
             key_states = key_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
             value_states = value_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
