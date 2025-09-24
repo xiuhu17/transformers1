@@ -314,9 +314,9 @@ class LlamaAttention(nn.Module):
         # Ulysses requires: b, s, n, h
         # need to permute and undo accordingly
         if self.config._attn_implementation == "ulysses":
-            sp_size = 2
+            sp_size = 1
             rank = dist.get_rank() % sp_size
-            register_groups([[0,1], [2,3]])
+            register_groups([[0], [1]])
             group_id = (dist.get_rank() // sp_size)  
             group_ = get_group(group_id)
 
@@ -379,9 +379,9 @@ class LlamaDecoderLayer(nn.Module):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         if self._attn_implementation == "ulysses":
-            sp_size = 2
+            sp_size = 1
             rank = dist.get_rank() % sp_size
-            register_groups([[0,1], [2,3]])
+            register_groups([[0], [1]])
             group_id = (dist.get_rank() // sp_size)  
             group_ = get_group(group_id)
             seq_length = self.seq_length
