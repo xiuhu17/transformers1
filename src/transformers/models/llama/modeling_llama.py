@@ -315,7 +315,7 @@ class LlamaAttention(nn.Module):
         # need to permute and undo accordingly
         if self.config._attn_implementation == "ulysses":
             sp_size = 2
-            rank = dist.get_rank() % 2
+            rank = dist.get_rank() % sp_size
             register_groups([[0,1], [2,3]])
             group_id = (dist.get_rank() // sp_size)  
             group_ = get_group(group_id)
@@ -380,7 +380,7 @@ class LlamaDecoderLayer(nn.Module):
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         if self._attn_implementation == "ulysses":
             sp_size = 2
-            rank = dist.get_rank() % 2
+            rank = dist.get_rank() % sp_size
             register_groups([[0,1], [2,3]])
             group_id = (dist.get_rank() // sp_size)  
             group_ = get_group(group_id)
