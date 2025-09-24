@@ -66,6 +66,17 @@ logger = logging.get_logger(__name__)
 _CHECKPOINT_FOR_DOC = "meta-llama/Llama-2-7b-hf"
 _CONFIG_FOR_DOC = "LlamaConfig"
 
+GROUP_REGISTRY = {}  # int -> dist.ProcessGroup
+
+def register_groups(groups):
+    """groups: List[List[int]], e.g. [[0,1],[2,3]]"""
+    for gid, ranks in enumerate(groups):
+        if gid not in GROUP_REGISTRY:
+            GROUP_REGISTRY[gid] = dist.new_group(ranks)
+
+def get_group(gid: int):
+    return GROUP_REGISTRY[gid] if gid is not None else dist.group.WORLD
+
 
 class LlamaRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
@@ -304,10 +315,16 @@ class LlamaAttention(nn.Module):
         # Ulysses requires: b, s, n, h
         # need to permute and undo accordingly
         if self.config._attn_implementation == "ulysses":
+            sp_size = 2
+            rank = dist.get_rank() % 2
+            register_groups([[0,1], [2,3], [4,5], [6,7]])
+            group_id = (dist.get_rank() // sp_size)  
+            group_ = get_group(group_id)
+
             query_states = query_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
             key_states = key_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
             value_states = value_states.contiguous().permute(0, 2, 1, 3).contiguous() # b, s, n, h
-            attention_interface = DistributedAttention(torch.nn.functional.scaled_dot_product_attention, dist.group.WORLD, scatter_idx=2, gather_idx=1)
+            attention_interface = DistributedAttention(torch.nn.functional.scaled_dot_product_attention, group_, scatter_idx=2, gather_idx=1)
             attn_weights = None
 
             # b, s, n, h
@@ -363,12 +380,15 @@ class LlamaDecoderLayer(nn.Module):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         if self._attn_implementation == "ulysses":
-            world_size = dist.get_world_size()
-            rank = dist.get_rank()
+            sp_size = 2
+            rank = dist.get_rank() % 2
+            register_groups([[0,1], [2,3], [4,5], [6,7]])
+            group_id = (dist.get_rank() // sp_size)  
+            group_ = get_group(group_id)
             seq_length = self.seq_length
-            seqs_per_rank = seq_length // world_size
+            seqs_per_rank = seq_length // sp_size
             start = rank * seqs_per_rank
-            end = (rank + 1) * seqs_per_rank if rank != world_size - 1 else seq_length 
+            end = (rank + 1) * seqs_per_rank if rank != sp_size - 1 else seq_length 
             if hidden_states.shape[1] > seqs_per_rank:
                 hidden_states = hidden_states[:, start:end, :]
             if isinstance(position_embeddings, tuple):
